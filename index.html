@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8086 Industrial Sorting Core — Real-Time Embedded Warehouse Automation Simulator</title>
+<meta name="description" content="Production-grade interactive 3D simulation of an industrial automated warehouse sorting line controlled by Intel 8086 microprocessor architecture.">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script>
+tailwind.config={theme:{extend:{colors:{bg:{primary:'#05080d',secondary:'#0b1118',tertiary:'#111827'},cyan:{diag:'#38d9ff'},blue:{cargo:'#258bff'},amber:{cargo:'#ffad32'},green:{cargo:'#42e58a'},red:{int:'#ff334f'}},fontFamily:{mono:['JetBrains Mono','monospace'],sans:['Inter','sans-serif']}}}}
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#05080d;color:#c8d6e5;font-family:'Inter',sans-serif;overflow:hidden}
+#canvas-container{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0}
+.glass-panel{background:rgba(5,8,13,0.85);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid rgba(56,217,255,0.08);box-shadow:0 4px 30px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.03)}
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:rgba(0,0,0,0.2)}::-webkit-scrollbar-thumb{background:rgba(56,217,255,0.3);border-radius:2px}
+.led{width:8px;height:8px;border-radius:50%;transition:all .15s;display:inline-block}
+.led-off{background:#1a1a2e;box-shadow:none}
+.led-red{background:#ff334f;box-shadow:0 0 6px #ff334f,0 0 12px rgba(255,51,79,0.3)}
+.led-green{background:#42e58a;box-shadow:0 0 6px #42e58a,0 0 12px rgba(66,229,138,0.3)}
+.led-cyan{background:#38d9ff;box-shadow:0 0 6px #38d9ff,0 0 12px rgba(56,217,255,0.3)}
+.led-amber{background:#ffad32;box-shadow:0 0 6px #ffad32,0 0 12px rgba(255,173,50,0.3)}
+.log-bus{color:#38d9ff}.log-pc{color:#a78bfa}.log-branch{color:#ffad32}.log-int{color:#ff334f}.log-done{color:#42e58a}
+.scan-lines{pointer-events:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.02) 2px,rgba(0,0,0,0.02) 4px);opacity:0.25}
+@keyframes pulse-glow{0%,100%{opacity:.6}50%{opacity:1}}.pulse-glow{animation:pulse-glow 2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}.blink{animation:blink 1s ease-in-out infinite}
+.status-running{background:rgba(66,229,138,0.12);color:#42e58a;border:1px solid rgba(66,229,138,0.25)}
+.status-halt{background:rgba(255,51,79,0.12);color:#ff334f;border:1px solid rgba(255,51,79,0.25)}
+.ctrl-btn{padding:5px 12px;border-radius:5px;font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.5px;transition:all .2s;cursor:pointer;border:1px solid rgba(56,217,255,0.15);background:rgba(56,217,255,0.06);color:#38d9ff;outline:none}
+.ctrl-btn:hover{background:rgba(56,217,255,0.15);border-color:rgba(56,217,255,0.35);transform:translateY(-1px)}
+.ctrl-btn:active{transform:translateY(0)}
+.ctrl-btn.active{background:rgba(56,217,255,0.2);border-color:#38d9ff;box-shadow:0 0 8px rgba(56,217,255,0.15)}
+.estop-btn{background:linear-gradient(135deg,#aa0000,#ff334f);border:2px solid #ff6b6b;color:white;font-weight:800;box-shadow:0 0 15px rgba(255,51,79,0.25),inset 0 -2px 4px rgba(0,0,0,0.3)}
+.estop-btn:hover{box-shadow:0 0 25px rgba(255,51,79,0.4)}
+.estop-btn.halted{animation:pulse-glow .5s ease-in-out infinite}
+.reg-cell{font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 5px;background:rgba(0,0,0,0.3);border-radius:3px;border:1px solid rgba(56,217,255,0.05);text-align:center}
+.reg-label{color:#4b5563;font-size:8px;text-transform:uppercase;letter-spacing:1px;display:block}
+.reg-value{color:#38d9ff;font-weight:600;display:block}
+.metric-card{background:rgba(0,0,0,0.3);border-radius:6px;padding:8px 10px;border:1px solid rgba(255,255,255,0.03)}
+.gauge-bar{height:5px;border-radius:3px;background:rgba(0,0,0,0.4);overflow:hidden}
+.gauge-fill{height:100%;border-radius:3px;transition:width .4s ease}
+[data-tooltip]{position:relative}
+[data-tooltip]:hover::after{content:attr(data-tooltip);position:absolute;bottom:100%;left:50%;transform:translateX(-50%);padding:3px 7px;background:#0f1520;color:#c8d6e5;font-size:9px;border-radius:3px;white-space:nowrap;border:1px solid rgba(56,217,255,0.15);z-index:200;pointer-events:none;margin-bottom:5px}
+.fill-indicator{width:100%;height:3px;background:rgba(0,0,0,0.4);border-radius:2px;margin-top:3px}
+.fill-bar{height:100%;border-radius:2px;transition:width .3s ease}
+.dist-bar{height:14px;border-radius:2px;transition:width .4s ease;min-width:2px}
+.hist-row{display:grid;grid-template-columns:1fr 50px 40px 50px;gap:4px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.02);font-size:9px;font-family:'JetBrains Mono',monospace}
+.hist-row:last-child{border-bottom:none}
+@media(max-width:1100px){.side-panel{display:none!important}.bottom-dock{left:8px!important;right:8px!important;transform:none!important}}
+</style>
+</head>
+<body>
+<div class="scan-lines"></div>
+<div id="canvas-container"></div>
+
+<!-- TOP BAR -->
+<div class="fixed top-0 left-0 right-0 z-50 glass-panel" style="border-top:none;border-left:none;border-right:none">
+<div class="flex items-center justify-between px-4 py-1.5">
+<div class="flex items-center gap-3">
+  <div>
+    <h1 class="text-xs font-extrabold tracking-wider text-white" style="font-family:'JetBrains Mono',monospace;letter-spacing:2px">8086 INDUSTRIAL SORTING CORE</h1>
+    <p class="text-[8px] tracking-widest text-gray-500 uppercase">Real-Time Embedded Warehouse Automation Simulator</p>
+  </div>
+</div>
+<div class="flex items-center gap-3">
+  <div class="flex items-center gap-1.5"><div class="led led-green"></div><span class="text-[8px] font-mono text-gray-500 tracking-wider">SIM ONLINE</span></div>
+  <div class="text-[9px] font-mono text-gray-400" id="beltSpeedDisp">BELT: 1.0 m/s</div>
+  <div id="statusBadge" class="status-running text-[9px] font-mono font-bold px-2.5 py-0.5 rounded-full tracking-wider">RUNNING</div>
+  <div class="text-[10px] font-mono text-cyan-diag font-semibold" id="sysClock">00:00:00.000</div>
+</div>
+</div>
+</div>
+
+<!-- LEFT DIAGNOSTICS PANEL -->
+<div class="side-panel fixed left-1.5 top-11 bottom-14 w-[270px] z-40 glass-panel rounded-lg overflow-hidden flex flex-col" style="max-height:calc(100vh - 100px)">
+<!-- Registers -->
+<div class="p-2.5 border-b border-white/5">
+  <div class="text-[8px] font-mono text-gray-500 tracking-widest mb-1.5 flex items-center gap-1.5"><span class="w-1 h-1 bg-cyan-diag rounded-full pulse-glow"></span>8086 REGISTER FILE</div>
+  <div class="grid grid-cols-4 gap-0.5" id="regGrid"></div>
+</div>
+<!-- Interrupt & Status -->
+<div class="p-2.5 border-b border-white/5">
+  <div class="flex items-center justify-between mb-1.5">
+    <div class="flex items-center gap-2.5">
+      <div class="flex items-center gap-1"><div class="led led-off" id="led_int0"></div><span class="text-[8px] font-mono text-gray-500">INT0</span></div>
+      <div class="flex items-center gap-1"><div class="led led-off" id="led_int1"></div><span class="text-[8px] font-mono text-gray-500">NMI</span></div>
+    </div>
+    <div class="text-[8px] font-mono px-1.5 py-0.5 rounded bg-black/30" id="adcDisp">ADC: <span class="text-gray-400">IDLE</span></div>
+  </div>
+  <div class="grid grid-cols-2 gap-1.5 text-[8px] font-mono">
+    <div><span class="text-gray-500">MOTOR:</span> <span class="text-green-cargo" id="motorDisp">ON</span> <span class="text-gray-600" id="pwmDisp">PWM 33%</span></div>
+    <div><span class="text-gray-500">PKG:</span> <span class="text-cyan-diag" id="pkgIdDisp">—</span></div>
+    <div class="col-span-2"><span class="text-gray-500">ROUTE:</span> <span class="text-gray-400" id="routeDisp">AWAITING PACKAGE</span></div>
+  </div>
+</div>
+<!-- Micro-Log -->
+<div class="flex-1 overflow-hidden flex flex-col min-h-0">
+  <div class="px-2.5 pt-2 pb-0.5"><div class="text-[8px] font-mono text-gray-500 tracking-widest flex items-center gap-1.5"><span class="w-1 h-1 bg-amber-cargo rounded-full"></span>ASSEMBLY MICRO-LOG</div></div>
+  <div class="flex-1 overflow-y-auto px-2.5 pb-2" id="logScroll">
+    <div class="text-[8px] font-mono leading-relaxed" id="logContent"></div>
+  </div>
+</div>
+</div>
+
+<!-- RIGHT METRICS PANEL -->
+<div class="side-panel fixed right-1.5 top-11 bottom-14 w-[250px] z-40 glass-panel rounded-lg overflow-y-auto" style="max-height:calc(100vh - 100px)">
+<div class="p-2.5 space-y-2">
+  <div class="text-[8px] font-mono text-gray-500 tracking-widest flex items-center gap-1.5"><span class="w-1 h-1 bg-green-cargo rounded-full pulse-glow"></span>SORTING METRICS</div>
+  <!-- Bin 1 -->
+  <div class="metric-card" style="border-left:3px solid #258bff">
+    <div class="flex items-center justify-between mb-0.5"><span class="text-[9px] font-bold text-blue-cargo">BIN 1 — LIGHT</span><span class="text-[16px] font-extrabold text-blue-cargo font-mono" id="b1c">0</span></div>
+    <div class="text-[8px] font-mono text-gray-500">ADC 00H–54H · &lt;2 kg</div>
+    <div class="flex items-center justify-between mt-0.5"><span class="text-[9px] font-mono text-gray-400" id="b1p">0%</span><div class="fill-indicator w-20"><div class="fill-bar" id="b1f" style="width:0%;background:#258bff"></div></div></div>
+  </div>
+  <!-- Bin 2 -->
+  <div class="metric-card" style="border-left:3px solid #ffad32">
+    <div class="flex items-center justify-between mb-0.5"><span class="text-[9px] font-bold text-amber-cargo">BIN 2 — MEDIUM</span><span class="text-[16px] font-extrabold text-amber-cargo font-mono" id="b2c">0</span></div>
+    <div class="text-[8px] font-mono text-gray-500">ADC 55H–AAH · 2–5 kg</div>
+    <div class="flex items-center justify-between mt-0.5"><span class="text-[9px] font-mono text-gray-400" id="b2p">0%</span><div class="fill-indicator w-20"><div class="fill-bar" id="b2f" style="width:0%;background:#ffad32"></div></div></div>
+  </div>
+  <!-- Bin 3 -->
+  <div class="metric-card" style="border-left:3px solid #42e58a">
+    <div class="flex items-center justify-between mb-0.5"><span class="text-[9px] font-bold text-green-cargo">BIN 3 — HEAVY</span><span class="text-[16px] font-extrabold text-green-cargo font-mono" id="b3c">0</span></div>
+    <div class="text-[8px] font-mono text-gray-500">ADC ABH–FFH · &gt;5 kg</div>
+    <div class="flex items-center justify-between mt-0.5"><span class="text-[9px] font-mono text-gray-400" id="b3p">0%</span><div class="fill-indicator w-20"><div class="fill-bar" id="b3f" style="width:0%;background:#42e58a"></div></div></div>
+  </div>
+  <!-- Throughput -->
+  <div class="metric-card">
+    <div class="text-[8px] font-mono text-gray-500 mb-1.5 tracking-wider">THROUGHPUT</div>
+    <div class="flex items-center justify-between mb-1"><span class="text-[9px] text-gray-400">Items/min</span><span class="text-[13px] font-bold text-cyan-diag font-mono" id="ipmDisp">0.0</span></div>
+    <div class="gauge-bar mb-1.5"><div class="gauge-fill" id="tpGauge" style="width:0%;background:linear-gradient(90deg,#38d9ff,#42e58a)"></div></div>
+    <div class="grid grid-cols-2 gap-1 text-[8px] font-mono">
+      <div><span class="text-gray-500">AVG:</span> <span class="text-gray-300" id="avgDisp">0.0s</span></div>
+      <div><span class="text-gray-500">TOTAL:</span> <span class="text-gray-300" id="totDisp">0</span></div>
+      <div><span class="text-gray-500">ADC:</span> <span class="text-cyan-diag" id="adcValDisp">00H</span></div>
+      <div><span class="text-gray-500">ACTIVE:</span> <span class="text-gray-300" id="actDisp">0</span></div>
+    </div>
+  </div>
+  <!-- Distribution -->
+  <div class="metric-card">
+    <div class="text-[8px] font-mono text-gray-500 mb-1.5 tracking-wider">ROUTE DISTRIBUTION</div>
+    <div class="space-y-1">
+      <div class="flex items-center gap-1.5"><span class="text-[8px] font-mono text-gray-500 w-5">B1</span><div class="flex-1 bg-black/20 rounded overflow-hidden"><div class="dist-bar" id="d1" style="width:0%;background:#258bff"></div></div><span class="text-[8px] font-mono text-gray-400 w-7 text-right" id="dp1">0%</span></div>
+      <div class="flex items-center gap-1.5"><span class="text-[8px] font-mono text-gray-500 w-5">B2</span><div class="flex-1 bg-black/20 rounded overflow-hidden"><div class="dist-bar" id="d2" style="width:0%;background:#ffad32"></div></div><span class="text-[8px] font-mono text-gray-400 w-7 text-right" id="dp2">0%</span></div>
+      <div class="flex items-center gap-1.5"><span class="text-[8px] font-mono text-gray-500 w-5">B3</span><div class="flex-1 bg-black/20 rounded overflow-hidden"><div class="dist-bar" id="d3" style="width:0%;background:#42e58a"></div></div><span class="text-[8px] font-mono text-gray-400 w-7 text-right" id="dp3">0%</span></div>
+    </div>
+  </div>
+  <!-- Package History -->
+  <div class="metric-card">
+    <div class="text-[8px] font-mono text-gray-500 mb-1.5 tracking-wider">RECENT PACKAGES</div>
+    <div class="hist-row" style="color:#4b5563;border-bottom:1px solid rgba(255,255,255,0.05)"><span>ID</span><span>ADC</span><span>KG</span><span>BIN</span></div>
+    <div id="histList" style="max-height:100px;overflow-y:auto"></div>
+  </div>
+  <!-- Session -->
+  <div class="metric-card">
+    <div class="text-[8px] font-mono text-gray-500 mb-1 tracking-wider">SESSION</div>
+    <div class="grid grid-cols-2 gap-1 text-[8px] font-mono">
+      <div><span class="text-gray-500">UPTIME:</span> <span class="text-gray-300" id="uptimeDisp">0m</span></div>
+      <div><span class="text-gray-500">HALTS:</span> <span class="text-gray-300" id="haltsDisp">0</span></div>
+      <div><span class="text-gray-500">INT0s:</span> <span class="text-gray-300" id="int0sDisp">0</span></div>
+      <div><span class="text-gray-500">FAULTS:</span> <span class="text-gray-300" id="faultsDisp">0</span></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- BOTTOM CONTROL DOCK -->
+<div class="fixed bottom-1.5 left-1/2 -translate-x-1/2 z-50 glass-panel rounded-xl px-3 py-2 flex items-center gap-2 flex-wrap justify-center bottom-dock" style="max-width:960px">
+  <button class="ctrl-btn" id="btnSpawn" data-tooltip="Spawn Package [Space]" onclick="SIM.spawn()">▶ SPAWN</button>
+  <button class="ctrl-btn" id="btnAuto" data-tooltip="Auto-Spawn [A]" onclick="SIM.toggleAuto()">⟳ AUTO</button>
+  <select class="ctrl-btn text-[9px] bg-transparent" id="pkgMode" style="appearance:none;padding-right:18px">
+    <option value="random" style="background:#0b1118">RANDOM</option>
+    <option value="light" style="background:#0b1118">FORCE LIGHT</option>
+    <option value="medium" style="background:#0b1118">FORCE MEDIUM</option>
+    <option value="heavy" style="background:#0b1118">FORCE HEAVY</option>
+  </select>
+  <div class="flex items-center gap-1.5" data-tooltip="Conveyor Speed">
+    <span class="text-[8px] font-mono text-gray-500">SPD</span>
+    <input type="range" min="0.2" max="3" step="0.1" value="1" id="spdSlider" class="w-16 h-1 accent-cyan-500" oninput="SIM.setSpeed(this.value)">
+    <span class="text-[8px] font-mono text-cyan-diag w-5" id="spdVal">1.0</span>
+  </div>
+  <div class="w-px h-5 bg-white/10"></div>
+  <button class="ctrl-btn estop-btn" id="btnEstop" data-tooltip="Emergency Stop [E]" onclick="SIM.estop()">⬤ E-STOP</button>
+  <button class="ctrl-btn" id="btnReset" data-tooltip="Reset/Resume [R]" onclick="SIM.resume()" style="border-color:rgba(66,229,138,0.2);color:#42e58a;background:rgba(66,229,138,0.06)">↻ RESUME</button>
+  <div class="w-px h-5 bg-white/10"></div>
+  <button class="ctrl-btn active" id="cam0" data-tooltip="Isometric [1]" onclick="SIM.cam(0)">ISO</button>
+  <button class="ctrl-btn" id="cam1" data-tooltip="Overhead [2]" onclick="SIM.cam(1)">TOP</button>
+  <button class="ctrl-btn" id="cam2" data-tooltip="Belt View [3]" onclick="SIM.cam(2)">BELT</button>
+  <button class="ctrl-btn" id="cam3" data-tooltip="Cabinet [4]" onclick="SIM.cam(3)">CPU</button>
+  <button class="ctrl-btn" id="cam4" data-tooltip="Front [5]" onclick="SIM.cam(4)">FRT</button>
+  <button class="ctrl-btn" id="cam5" data-tooltip="Auto Orbit [0]" onclick="SIM.cam(5)">ORBIT</button>
+  <div class="w-px h-5 bg-white/10"></div>
+  <button class="ctrl-btn active" id="togL" data-tooltip="Labels" onclick="SIM.tog('labels')">LBL</button>
+  <button class="ctrl-btn active" id="togV" data-tooltip="VFX" onclick="SIM.tog('vfx')">VFX</button>
+  <button class="ctrl-btn active" id="togP" data-tooltip="Particles" onclick="SIM.tog('particles')">PRT</button>
+</div>
+
+<!-- LOADING SCREEN -->
+<div class="fixed inset-0 z-[100] flex items-center justify-center" id="loadScreen" style="background:#05080d">
+<div class="text-center">
+  <h1 class="text-xl font-extrabold tracking-[5px] text-white mb-5" style="font-family:'JetBrains Mono',monospace">8086 INDUSTRIAL SORTING CORE</h1>
+  <div class="space-y-0.5 text-[10px] font-mono text-gray-500" id="loadSteps"><div class="text-cyan-diag">INITIALIZING SENSOR BUS...</div></div>
+  <div class="mt-5 w-44 mx-auto gauge-bar"><div class="gauge-fill" id="loadBar" style="width:0%;background:linear-gradient(90deg,#38d9ff,#42e58a);transition:width .3s"></div></div>
+</div>
+</div>
+
+<script>
+// ================================================================
+//  PRODUCTION-GRADE 8086 SORTING CORE SIMULATION
+//  Architecture: Centralized State Manager + Per-Package CPU Context
+//  No setTimeout race conditions — all timers are delta-time based
+// ================================================================
+
+'use strict';
+
+// ================================================================
+//  CONFIGURATION
+// ================================================================
+const C = Object.freeze({
+  CONV_LEN: 14, CONV_W: 1.6, CONV_H: 1.1,
+  DIV1: 0.40, DIV2: 0.70,
+  IR_POS: 0.08, SCAN_POS: 0.22,
+  MAX_PKG: 10, SPAWN_CD: 1200, AUTO_CD: 2200,
+  ADC_TIME: 400, GATE_ROT: Math.PI/4,
+  GATE_HOLD: 600, GATE_RETURN: 400,
+  COL: { bg:0x05080d, cyan:0x38d9ff, blue:0x258bff, amber:0xffad32, green:0x42e58a, red:0xff334f,
+         metal:0x3a4556, dkMetal:0x1e2838, concrete:0x1a1d24, rubber:0x15181e, cardboard:0x8b6914 }
+});
+
+// ================================================================
+//  CENTRALIZED STATE MANAGER
+//  Single source of truth — all UI reads from here
+// ================================================================
+const STATE = {
+  // 8086 CPU (per-cycle snapshot for display; actual logic is per-package)
+  cpu: { AX:0, BX:0, CX:0, DX:0, SP:0xFFFE, BP:0, SI:0, DI:0,
+         IP:0x0100, FLAGS:0x0002, CS:0x0800, DS:0x0900, SS:0x0A00, ES:0x0B00,
+         ADC_DATA:0, PORT_A:0x01, PORT_B:0x00 },
+  halted: false, int0: false, int1: false,
+  adcState: 'IDLE', // IDLE | CONVERTING | READ_COMPLETE
+  speed: 1.0,
+  running: true,
+  autoSpawn: false,
+  startTime: Date.now(),
+  // Counters
+  bins: [0,0,0], total: 0, haltCount: 0, int0Count: 0, faults: 0,
+  procTimes: [],
+  // Live packages on conveyor
+  packages: [],
+  // Full inventory (persisted)
+  history: [],
+  // Diverter state (delta-time driven, no setTimeout)
+  diverters: [
+    { angle:0, target:0, state:'idle', timer:0 },
+    { angle:0, target:0, state:'idle', timer:0 }
+  ],
+  // Timing
+  lastSpawn: 0, pkgSeq: 0,
+  // Options
+  opts: { labels:true, vfx:true, particles:true },
+  // Camera
+  camPreset: 0, camTransition: null, autoOrbit: false
+};
+
+// Try to restore from localStorage
+try {
+  const saved = localStorage.getItem('8086_sort_state');
+  if (saved) {
+    const s = JSON.parse(saved);
+    STATE.bins = s.bins || [0,0,0];
+    STATE.total = s.total || 0;
+    STATE.haltCount = s.haltCount || 0;
+    STATE.int0Count = s.int0Count || 0;
+    STATE.history = s.history || [];
+    STATE.pkgSeq = s.pkgSeq || 0;
+  }
+} catch(e) { /* ignore */ }
+
+function saveState() {
+  try {
+    localStorage.setItem('8086_sort_state', JSON.stringify({
+      bins: STATE.bins, total: STATE.total,
+      haltCount: STATE.haltCount, int0Count: STATE.int0Count,
+      history: STATE.history.slice(-50), pkgSeq: STATE.pkgSeq
+    }));
+  } catch(e) { /* quota */ }
+}
+
+// ================================================================
+//  THREE.JS GLOBALS
+// ================================================================
+let scene, camera, renderer, controls;
+let conveyorGroup, beltTex;
+let diverterArms=[], diverterLEDs=[], binMeshes=[];
+let irBeam, irLed, scanBeamMesh, scannerGrp;
+let cabinetGrp, pcbTraces=[], rollers=[];
+let dustPts, beacon;
+let labels = [];
+const mats = {};
+const theClock = new THREE.Clock();
+
+// Cached DOM refs (avoid getElementById every frame)
+const DOM = {};
+
+// ================================================================
+//  LOADING SEQUENCE
+// ================================================================
+const LOAD_MSGS = ['INITIALIZING SENSOR BUS...','LOADING ADC0804 INTERFACE...','CONFIGURING 8255 PPI...',
+  'VERIFYING DIVERTER ACTUATORS...','CALIBRATING IR BREAK-BEAM...','MOTOR PWM READY',
+  'LOADING 8086 INTERRUPT VECTORS...','SYSTEM ONLINE — PRESS SPAWN PACKAGE TO BEGIN'];
+let loadIdx = 0;
+function advLoad() {
+  if (loadIdx >= LOAD_MSGS.length) {
+    document.getElementById('loadBar').style.width='100%';
+    setTimeout(()=>{
+      const ls=document.getElementById('loadScreen');
+      ls.style.opacity='0'; ls.style.transition='opacity .7s';
+      setTimeout(()=>ls.style.display='none',700);
+    },300);
+    return;
+  }
+  const el=document.getElementById('loadSteps');
+  const d=document.createElement('div');
+  d.textContent=LOAD_MSGS[loadIdx];
+  d.className = loadIdx===LOAD_MSGS.length-1?'text-green-cargo':'text-gray-500';
+  el.appendChild(d);
+  document.getElementById('loadBar').style.width=((loadIdx+1)/LOAD_MSGS.length*100)+'%';
+  if(el.children.length>1){const p=el.children[el.children.length-2];p.className='text-cyan-diag';p.textContent='✓ '+p.textContent;}
+  loadIdx++;
+  setTimeout(advLoad,200+Math.random()*150);
+}
+
+// ================================================================
+//  INIT
+// ================================================================
+function init() {
+  // Cache DOM elements
+  ['regGrid','led_int0','led_int1','adcDisp','motorDisp','pwmDisp','pkgIdDisp','routeDisp',
+   'logContent','logScroll','b1c','b2c','b3c','b1p','b2p','b3p','b1f','b2f','b3f',
+   'ipmDisp','tpGauge','avgDisp','totDisp','adcValDisp','actDisp','d1','d2','d3','dp1','dp2','dp3',
+   'histList','sysClock','beltSpeedDisp','statusBadge','spdVal',
+   'uptimeDisp','haltsDisp','int0sDisp','faultsDisp',
+   'btnEstop','btnAuto','cam0','cam1','cam2','cam3','cam4','cam5',
+   'togL','togV','togP'
+  ].forEach(id => DOM[id] = document.getElementById(id));
+
+  // Scene
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(C.COL.bg);
+  scene.fog = new THREE.FogExp2(C.COL.bg, 0.016);
+
+  // Camera
+  camera = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, 0.1, 200);
+  camera.position.set(14, 11, 14);
+
+  // Renderer
+  renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.85;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+  // Controls
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.07;
+  controls.minDistance = 3;
+  controls.maxDistance = 45;
+  controls.maxPolarAngle = Math.PI/2 - 0.04;
+  controls.target.set(0, 1, 0);
+  controls.update();
+
+  buildMaterials();
+  buildLights();
+  buildFloor();
+  buildWalls();
+  buildConveyor();
+  buildDiverters();
+  buildBins();
+  buildIRSensor();
+  buildScanner();
+  buildCabinet();
+  buildHazardStripes();
+  buildDust();
+  buildBeacon();
+
+  buildRegGrid();
+  refreshMetrics();
+  refreshHistory();
+  advLoad();
+
+  addEventListener('resize', onResize);
+  addEventListener('keydown', onKey);
+
+  animate();
+  log('MOV AL, 01H / OUT MOTOR_PORT, AL      ; conveyor motor ON','bus');
+  log('MOV AX, 0100H / MOV IP, AX           ; program counter set','pc');
+  log('; 8086 SORTING CORE v2.0 — production build','done');
+}
+
+// ================================================================
+//  MATERIALS
+// ================================================================
+function buildMaterials() {
+  mats.metal = new THREE.MeshStandardMaterial({color:C.COL.metal,roughness:.45,metalness:.8});
+  mats.dkMetal = new THREE.MeshStandardMaterial({color:C.COL.dkMetal,roughness:.55,metalness:.75});
+  mats.rubber = new THREE.MeshStandardMaterial({color:C.COL.rubber,roughness:.92,metalness:.05});
+  mats.yellow = new THREE.MeshStandardMaterial({color:0xf5c518,roughness:.5,metalness:.1});
+  mats.tape = new THREE.MeshStandardMaterial({color:0xc8b070,roughness:.3,metalness:.1,transparent:true,opacity:.7});
+  mats.pcb = new THREE.MeshStandardMaterial({color:0x0a3020,roughness:.7,metalness:.2});
+  const emMat=(c,i=2)=>new THREE.MeshStandardMaterial({color:c,emissive:c,emissiveIntensity:i,roughness:.3});
+  mats.eCyan=emMat(C.COL.cyan); mats.eRed=emMat(C.COL.red); mats.eGreen=emMat(C.COL.green,1.5); mats.eAmber=emMat(C.COL.amber,1.5);
+}
+
+// ================================================================
+//  LIGHTING
+// ================================================================
+function buildLights() {
+  scene.add(new THREE.HemisphereLight(0x3355aa,0x111122,0.35));
+  const key=new THREE.DirectionalLight(0xc8deff,0.85);
+  key.position.set(5,16,6); key.castShadow=true;
+  key.shadow.mapSize.width=key.shadow.mapSize.height=2048;
+  key.shadow.camera.near=.5;key.shadow.camera.far=45;
+  key.shadow.camera.left=key.shadow.camera.bottom=-16;
+  key.shadow.camera.right=key.shadow.camera.top=16;
+  key.shadow.bias=-.001;
+  scene.add(key);
+  scene.add(new THREE.DirectionalLight(0x8899bb,0.25)).position.set(-5,8,-3);
+  // Overhead spots with fixtures
+  for(let i=0;i<4;i++){
+    const s=new THREE.SpotLight(0xddeeff,.5,22,Math.PI/6,.5,1.5);
+    s.position.set(-5+i*3.5,7.5,0); s.target.position.set(-5+i*3.5,0,0);
+    scene.add(s); scene.add(s.target);
+    const fg=new THREE.Group();
+    fg.add(new THREE.Mesh(new THREE.BoxGeometry(.7,.12,.35),mats.dkMetal));
+    const mt=new THREE.Mesh(new THREE.CylinderGeometry(.03,.03,.25,6),mats.metal);mt.position.y=.18;fg.add(mt);
+    const gl=new THREE.Mesh(new THREE.PlaneGeometry(.5,.25),new THREE.MeshBasicMaterial({color:0xddeeff,transparent:true,opacity:.25,side:2}));
+    gl.position.y=-.07;gl.rotation.x=Math.PI/2;fg.add(gl);
+    fg.position.set(-5+i*3.5,7.5,0);scene.add(fg);
+  }
+  scene.add(new THREE.PointLight(0xffaa33,.35,6)).position.set(-C.CONV_LEN/2+.5,2,0);
+  scene.add(new THREE.PointLight(0xffaa33,.25,5)).position.set(C.CONV_LEN/2-.5,2,0);
+  scene.add(new THREE.PointLight(0x42e58a,.25,4)).position.set(0,2.5,-2);
+}
+
+// ================================================================
+//  FLOOR
+// ================================================================
+function buildFloor() {
+  const f=new THREE.Mesh(new THREE.PlaneGeometry(60,60),new THREE.MeshStandardMaterial({color:0x151920,roughness:.92,metalness:.02}));
+  f.rotation.x=-Math.PI/2;f.receiveShadow=true;scene.add(f);
+  const g=new THREE.GridHelper(30,30,0x1e2530,0x1a1f28);g.position.y=.005;scene.add(g);
+  for(let i=-3;i<=3;i++){const s=new THREE.Mesh(new THREE.PlaneGeometry(30,.02),new THREE.MeshBasicMaterial({color:0x0d1015}));s.rotation.x=-Math.PI/2;s.position.set(0,.006,i*4);scene.add(s);}
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(C.CONV_LEN+2,C.CONV_W+2),new THREE.MeshStandardMaterial({color:0x1a2030,roughness:.88}));
+  m.rotation.x=-Math.PI/2;m.position.y=.008;scene.add(m);
+}
+
+// ================================================================
+//  WALLS
+// ================================================================
+function buildWalls() {
+  scene.add(new THREE.Mesh(new THREE.PlaneGeometry(30,8),new THREE.MeshStandardMaterial({color:0x0e1218,roughness:.9}))).position.set(0,4,-8);
+  for(let x=-10;x<=10;x+=5){const c=new THREE.Mesh(new THREE.BoxGeometry(.35,8,.35),mats.dkMetal);c.position.set(x,4,-7.8);c.castShadow=true;scene.add(c);}
+  for(let z=-4;z<=4;z+=4){scene.add(new THREE.Mesh(new THREE.BoxGeometry(24,.22,.18),mats.dkMetal)).position.set(0,7.2,z);}
+  for(let x=-8;x<=8;x+=4){scene.add(new THREE.Mesh(new THREE.BoxGeometry(.12,.12,12),mats.dkMetal)).position.set(x,7.35,0);}
+  scene.add(new THREE.Mesh(new THREE.BoxGeometry(20,.06,.35),mats.metal)).position.set(0,5.5,-7.5);
+  const duct=new THREE.Mesh(new THREE.CylinderGeometry(.25,.25,14,8),mats.metal);duct.rotation.z=Math.PI/2;duct.position.set(0,6.5,-6);scene.add(duct);
+  [0xff4444,0xffcc00,0x3399ff].forEach((c,i)=>{
+    scene.add(new THREE.Mesh(new THREE.PlaneGeometry(.65,.65),new THREE.MeshStandardMaterial({color:0xcccccc,roughness:.4}))).position.set(-6+i*6,3.5,-7.79);
+    scene.add(new THREE.Mesh(new THREE.PlaneGeometry(.55,.55),new THREE.MeshStandardMaterial({color:c,roughness:.5,emissive:c,emissiveIntensity:.1}))).position.set(-6+i*6,3.5,-7.78);
+  });
+}
+
+// ================================================================
+//  HAZARD STRIPES
+// ================================================================
+function buildHazardStripes() {
+  const cv=document.createElement('canvas');cv.width=256;cv.height=32;
+  const cx=cv.getContext('2d');
+  for(let i=0;i<16;i++){cx.fillStyle=i%2===0?'#f5c518':'#1a1a1a';cx.beginPath();cx.moveTo(i*16,0);cx.lineTo(i*16+16,0);cx.lineTo(i*16,32);cx.lineTo(i*16-16,32);cx.fill();}
+  const tx=new THREE.CanvasTexture(cv);tx.wrapS=tx.wrapT=THREE.RepeatWrapping;
+  const W=C.CONV_W,L=C.CONV_LEN;
+  [{x:0,z:W/2+1.2,w:L+3,r:0},{x:0,z:-(W/2+1.2),w:L+3,r:0},{x:L/2+1.5,z:0,w:W+2.4,r:Math.PI/2},{x:-(L/2+1.5),z:0,w:W+2.4,r:Math.PI/2}]
+  .forEach(s=>{const t=tx.clone();t.repeat.set(s.w*2,1);const m=new THREE.Mesh(new THREE.PlaneGeometry(s.w,.15),new THREE.MeshStandardMaterial({map:t,roughness:.6,metalness:.1}));m.rotation.x=-Math.PI/2;m.rotation.z=s.r;m.position.set(s.x,.012,s.z);scene.add(m);});
+}
+
+// ================================================================
+//  CONVEYOR
+// ================================================================
+function buildConveyor() {
+  conveyorGroup=new THREE.Group();
+  const L=C.CONV_LEN,W=C.CONV_W,H=C.CONV_H;
+  // Frame rails
+  const rg=new THREE.BoxGeometry(L,.08,.07);
+  const lr=new THREE.Mesh(rg,mats.metal);lr.position.set(0,H,W/2);lr.castShadow=true;conveyorGroup.add(lr);
+  const rr=lr.clone();rr.position.z=-W/2;conveyorGroup.add(rr);
+  // Bottom rails
+  const bg=new THREE.BoxGeometry(L,.05,.05);
+  const bl=new THREE.Mesh(bg,mats.dkMetal);bl.position.set(0,H-.35,W/2-.04);conveyorGroup.add(bl);
+  const br=bl.clone();br.position.z=-(W/2-.04);conveyorGroup.add(br);
+  // Legs
+  [-L/2+.5,-L/6,L/6,L/2-.5].forEach(x=>{[-1,1].forEach(s=>{
+    const leg=new THREE.Mesh(new THREE.BoxGeometry(.07,H,.07),mats.metal);
+    leg.position.set(x,H/2,s*(W/2+.04));leg.castShadow=true;conveyorGroup.add(leg);
+    const ft=new THREE.Mesh(new THREE.CylinderGeometry(.07,.09,.04,8),mats.dkMetal);
+    ft.position.set(x,.02,s*(W/2+.04));conveyorGroup.add(ft);
+    if(s===1){const br2=new THREE.Mesh(new THREE.BoxGeometry(.04,.04,W+.08),mats.dkMetal);br2.position.set(x,H*.3,0);conveyorGroup.add(br2);}
+  });});
+  // Belt texture
+  const bc=document.createElement('canvas');bc.width=512;bc.height=128;const bx=bc.getContext('2d');
+  bx.fillStyle='#15181e';bx.fillRect(0,0,512,128);
+  for(let i=0;i<64;i++){bx.strokeStyle=i%4===0?'#1e2228':'#181c22';bx.lineWidth=i%4===0?2:1;bx.beginPath();bx.moveTo(i*8,0);bx.lineTo(i*8,128);bx.stroke();}
+  beltTex=new THREE.CanvasTexture(bc);beltTex.wrapS=beltTex.wrapT=THREE.RepeatWrapping;beltTex.repeat.set(8,1);
+  const belt=new THREE.Mesh(new THREE.BoxGeometry(L-.2,.025,W-.14),new THREE.MeshStandardMaterial({map:beltTex,roughness:.9,metalness:.05,color:0x22262e}));
+  belt.position.set(0,H+.013,0);belt.receiveShadow=true;conveyorGroup.add(belt);
+  // Rollers
+  const rlg=new THREE.CylinderGeometry(.055,.055,W-.1,10);
+  for(let i=0;i<15;i++){const x=-L/2+.5+i*(L-1)/14;
+    const r=new THREE.Mesh(rlg,mats.metal);r.rotation.x=Math.PI/2;r.position.set(x,H-.01,0);conveyorGroup.add(r);rollers.push(r);
+    if(i%3===0){const rr2=new THREE.Mesh(rlg,mats.dkMetal);rr2.rotation.x=Math.PI/2;rr2.position.set(x,H-.32,0);conveyorGroup.add(rr2);rollers.push(rr2);}
+  }
+  // Motor
+  const mg=new THREE.Group();
+  const mb=new THREE.Mesh(new THREE.CylinderGeometry(.18,.18,.45,12),mats.dkMetal);mb.rotation.x=Math.PI/2;mb.position.z=.3;mg.add(mb);
+  mg.add(new THREE.Mesh(new THREE.BoxGeometry(.3,.25,.2),mats.metal)).position.z=.05;
+  const dr=new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,W-.08,14),mats.metal);dr.rotation.x=Math.PI/2;mg.add(dr);rollers.push(dr);
+  mg.add(new THREE.Mesh(new THREE.SphereGeometry(.025,6,6),mats.eGreen.clone())).position.set(.15,.12,.3);
+  mg.position.set(-L/2-.1,H,W/2+.12);conveyorGroup.add(mg);
+  // Guide plates
+  const gpg=new THREE.BoxGeometry(L-1,.1,.02),gpm=new THREE.MeshStandardMaterial({color:0x2a3040,roughness:.5,metalness:.6});
+  conveyorGroup.add(new THREE.Mesh(gpg,gpm)).position.set(0,H+.07,W/2-.02);
+  conveyorGroup.add(new THREE.Mesh(gpg,gpm)).position.set(0,H+.07,-(W/2-.02));
+  // Cable glands
+  for(let i=0;i<6;i++){conveyorGroup.add(new THREE.Mesh(new THREE.CylinderGeometry(.018,.022,.035,6),mats.dkMetal)).position.set(-L/2+1+i*2,H-.08,W/2+.05);}
+  scene.add(conveyorGroup);
+}
+
+// ================================================================
+//  DIVERTERS
+// ================================================================
+function buildDiverters() {
+  const L=C.CONV_LEN,H=C.CONV_H,W=C.CONV_W;
+  [C.DIV1,C.DIV2].forEach((pos,idx)=>{
+    const g=new THREE.Group();const xp=-L/2+pos*L;
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(.25,.18,.08),mats.metal)).position.set(0,.1,W/2+.04);
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(.18,.12,.12),mats.dkMetal)).position.set(0,.22,W/2+.07);
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(.02,.02,.12,8),mats.metal)).position.set(0,.22,W/2-.02);
+    // Arm
+    const ag=new THREE.Group();
+    ag.add(new THREE.Mesh(new THREE.BoxGeometry(.07,.13,W*.82),mats.yellow)).position.z=-W*.82/2;
+    ag.add(new THREE.Mesh(new THREE.BoxGeometry(.09,.15,.025),mats.rubber)).position.z=-W*.82;
+    ag.position.set(0,H+.07,W/2-.05);
+    g.add(ag);diverterArms.push(ag);
+    // LED
+    const led=new THREE.Mesh(new THREE.SphereGeometry(.025,8,8),mats.eCyan.clone());
+    led.material.emissiveIntensity=.3;led.position.set(0,.32,W/2+.1);g.add(led);diverterLEDs.push(led);
+    // Cable
+    g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0,.22,W/2+.13),new THREE.Vector3(.25,.28,W/2+.45),new THREE.Vector3(.25,.45,W/2+.75)]),8,.01,4,false),new THREE.MeshStandardMaterial({color:0x222222,roughness:.8})));
+    // Label
+    const lbl=mkSprite(idx===0?'GATE 1':'GATE 2',{size:26,color:'#38d9ff'});lbl.position.set(0,.5,W/2+.12);lbl.scale.set(.5,.25,1);g.add(lbl);labels.push(lbl);
+    g.position.x=xp;scene.add(g);
+  });
+}
+
+// ================================================================
+//  BINS
+// ================================================================
+function buildBins() {
+  const L=C.CONV_LEN,H=C.CONV_H,W=C.CONV_W;
+  [{x:-L/2+C.DIV1*L,z:-(W/2+1.5),c:0x258bff,t:'BIN 1\nLIGHT\n<2kg',a:'#258bff'},
+   {x:-L/2+C.DIV2*L,z:-(W/2+1.5),c:0xffad32,t:'BIN 2\nMEDIUM\n2-5kg',a:'#ffad32'},
+   {x:L/2+.8,z:0,c:0x42e58a,t:'BIN 3\nHEAVY\n>5kg',a:'#42e58a'}]
+  .forEach((b,idx)=>{
+    const g=new THREE.Group();
+    const bw=1.1,bh=.75,bd=.95,wt=.05;
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(bw,wt,bd),mats.dkMetal)).position.y=wt/2;
+    [{w:bw,h:bh,d:wt,x:0,y:bh/2,z:bd/2},{w:bw,h:bh,d:wt,x:0,y:bh/2,z:-bd/2},{w:wt,h:bh,d:bd,x:bw/2,y:bh/2,z:0},{w:wt,h:bh,d:bd,x:-bw/2,y:bh/2,z:0}]
+    .forEach(w=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w.w,w.h,w.d),mats.dkMetal);m.position.set(w.x,w.y,w.z);m.castShadow=true;g.add(m);});
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(bw+.02,.04,.004),new THREE.MeshStandardMaterial({color:b.c,emissive:b.c,emissiveIntensity:.5,roughness:.3}))).position.set(0,bh-.03,bd/2+.025);
+    [-1,1].forEach(s=>{g.add(new THREE.Mesh(new THREE.TorusGeometry(.05,.01,6,12,Math.PI),mats.metal)).position.set(s*(bw/2+.02),bh*.6,0);});
+    [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([fx,fz])=>g.add(new THREE.Mesh(new THREE.CylinderGeometry(.035,.045,.04,6),mats.metal)).position.set(fx*(bw/2-.08),0,fz*(bd/2-.08)));
+    const lbl=mkSprite(b.t,{size:22,color:b.a});lbl.position.set(0,bh+.2,bd/2+.08);lbl.scale.set(.7,.45,1);g.add(lbl);labels.push(lbl);
+    if(idx<2){const ch=new THREE.Mesh(new THREE.BoxGeometry(.5,.025,1.1),mats.metal);ch.position.set(0,H*.55,-(W/2+.25));ch.rotation.z=-.12;ch.rotation.x=.18;g.add(ch);}
+    g.position.set(b.x,0,b.z);scene.add(g);binMeshes.push(g);
+  });
+}
+
+// ================================================================
+//  IR SENSOR
+// ================================================================
+function buildIRSensor() {
+  const L=C.CONV_LEN,H=C.CONV_H,W=C.CONV_W,xp=-L/2+C.IR_POS*L;
+  const g=new THREE.Group();
+  [-1,1].forEach(s=>{
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(.07,.35,.07),mats.dkMetal)).position.set(0,H+.18,s*(W/2+.04));
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(.05,.05,.05),new THREE.MeshStandardMaterial({color:0x331111,roughness:.3,metalness:.5}))).position.set(0,H+.14,s*W/2);
+    const lens=new THREE.Mesh(new THREE.SphereGeometry(.018,8,8),mats.eRed.clone());lens.material.emissiveIntensity=1;lens.position.set(0,H+.14,s*(W/2-.02*s));g.add(lens);
+  });
+  irBeam=new THREE.Mesh(new THREE.CylinderGeometry(.004,.004,W-.08,4),new THREE.MeshBasicMaterial({color:0xff334f,transparent:true,opacity:.55}));
+  irBeam.rotation.x=Math.PI/2;irBeam.position.set(0,H+.14,0);g.add(irBeam);
+  irLed=new THREE.Mesh(new THREE.SphereGeometry(.02,8,8),mats.eRed.clone());irLed.material.emissiveIntensity=.4;irLed.position.set(0,H+.4,0);g.add(irLed);
+  const lbl=mkSprite('IR BREAK-BEAM\nINT0',{size:20,color:'#ff334f'});lbl.position.set(0,H+.55,0);lbl.scale.set(.6,.3,1);g.add(lbl);labels.push(lbl);
+  g.position.x=xp;scene.add(g);
+}
+
+// ================================================================
+//  SCANNER
+// ================================================================
+function buildScanner() {
+  const L=C.CONV_LEN,H=C.CONV_H,W=C.CONV_W,xp=-L/2+C.SCAN_POS*L,bH=1.15;
+  scannerGrp=new THREE.Group();
+  [-1,1].forEach(s=>scannerGrp.add(new THREE.Mesh(new THREE.BoxGeometry(.1,bH,.1),mats.metal)).position.set(0,H+bH/2,s*(W/2+.08)));
+  scannerGrp.add(new THREE.Mesh(new THREE.BoxGeometry(.12,.1,W+.35),mats.dkMetal)).position.set(0,H+bH,0);
+  scannerGrp.add(new THREE.Mesh(new THREE.BoxGeometry(.22,.1,.45),mats.dkMetal)).position.set(0,H+bH-.1,0);
+  scannerGrp.add(new THREE.Mesh(new THREE.PlaneGeometry(.18,.35),new THREE.MeshStandardMaterial({color:0x0a3050,emissive:C.COL.cyan,emissiveIntensity:.5,transparent:true,opacity:.55,roughness:.1,side:2}))).position.set(0,H+bH-.17,0);
+  scannerGrp.children[scannerGrp.children.length-1].rotation.x=Math.PI/2;
+  for(let i=0;i<8;i++){const ln=new THREE.Mesh(new THREE.PlaneGeometry(.008+Math.random()*.012,.3),new THREE.MeshBasicMaterial({color:C.COL.cyan,transparent:true,opacity:.25,side:2}));ln.rotation.x=Math.PI/2;ln.position.set(0,H+bH-.175,-.12+i*.035);scannerGrp.add(ln);}
+  scanBeamMesh=new THREE.Mesh(new THREE.PlaneGeometry(.015,bH-.3),new THREE.MeshBasicMaterial({color:C.COL.cyan,transparent:true,opacity:0,side:2}));
+  scanBeamMesh.position.set(0,H+bH/2,0);scannerGrp.add(scanBeamMesh);
+  scannerGrp.add(new THREE.Mesh(new THREE.BoxGeometry(.5,.035,W-.2),new THREE.MeshStandardMaterial({color:0x2a3545,roughness:.4,metalness:.7}))).position.set(0,H-.02,0);
+  const lbl=mkSprite('BARCODE/WEIGHT\nSCANNER',{size:20,color:'#38d9ff'});lbl.position.set(0,H+bH+.25,0);lbl.scale.set(.6,.3,1);scannerGrp.add(lbl);labels.push(lbl);
+  scannerGrp.position.x=xp;scene.add(scannerGrp);
+}
+
+// ================================================================
+//  CONTROL CABINET
+// ================================================================
+function buildCabinet() {
+  const W=C.CONV_W,cW=1.1,cH=1.5,cD=.45;
+  cabinetGrp=new THREE.Group();
+  cabinetGrp.add(new THREE.Mesh(new THREE.BoxGeometry(cW,cH,cD),new THREE.MeshStandardMaterial({color:0x1a2535,roughness:.3,metalness:.5,transparent:true,opacity:.3}))).position.y=cH/2;
+  [-1,1].forEach(y=>cabinetGrp.add(new THREE.Mesh(new THREE.BoxGeometry(cW+.04,.035,cD+.04),mats.dkMetal)).position.y=y===-1?.02:cH);
+  cabinetGrp.add(new THREE.Mesh(new THREE.BoxGeometry(.85,.95,.025),mats.pcb)).position.set(0,cH*.5,0);
+  cabinetGrp.add(new THREE.Mesh(new THREE.BoxGeometry(.22,.35,.05),new THREE.MeshStandardMaterial({color:0x1a1a1a,roughness:.5,metalness:.3}))).position.set(0,cH*.5,.03);
+  const cl=mkSprite('8086',{size:34,color:'#ffffff',bg:'rgba(0,0,0,0)'});cl.position.set(0,cH*.5,.065);cl.scale.set(.18,.09,1);cabinetGrp.add(cl);
+  const cry=new THREE.Mesh(new THREE.CylinderGeometry(.025,.025,.08,6),new THREE.MeshStandardMaterial({color:0x888888,roughness:.2,metalness:.8,emissive:C.COL.cyan,emissiveIntensity:.3}));
+  cry.rotation.x=Math.PI/2;cry.position.set(.22,cH*.6,.03);cabinetGrp.add(cry);
+  // Traces
+  [[.12,.3,.3,.3],[-.12,.5,-.3,.5],[.12,.65,.3,.65],[-.12,.25,-.3,.4],[.08,.75,.28,.85],[-.08,.75,-.28,.85]]
+  .forEach(([x1,y1,x2,y2])=>{
+    const tg=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x1,y1+cH*.1,.035),new THREE.Vector3(x2,y2+cH*.1,.035)]);
+    const t=new THREE.Line(tg,new THREE.LineBasicMaterial({color:C.COL.cyan,transparent:true,opacity:.35}));
+    cabinetGrp.add(t);pcbTraces.push(t);
+  });
+  [C.COL.cyan,C.COL.green,C.COL.amber,C.COL.red].forEach((c,i)=>{for(let j=0;j<2;j++){
+    const l=new THREE.Mesh(new THREE.SphereGeometry(.012,6,6),new THREE.MeshStandardMaterial({color:c,emissive:c,emissiveIntensity:.5,roughness:.3}));
+    l.position.set(-.25+i*.13,cH*.23+j*.07,.035);cabinetGrp.add(l);
+  }});
+  for(let i=0;i<5;i++){cabinetGrp.add(new THREE.Mesh(new THREE.BoxGeometry(.45,.008,.025),mats.dkMetal)).position.set(0,cH*.83+i*.022,cD/2-.02);}
+  const lbl=mkSprite('8086 CONTROL\nCABINET',{size:20,color:'#38d9ff'});lbl.position.set(0,cH+.25,0);lbl.scale.set(.6,.3,1);cabinetGrp.add(lbl);labels.push(lbl);
+  cabinetGrp.position.set(-2,0,W/2+1.5);scene.add(cabinetGrp);
+}
+
+// ================================================================
+//  DUST
+// ================================================================
+function buildDust() {
+  const n=250,pos=new Float32Array(n*3);
+  for(let i=0;i<n;i++){pos[i*3]=(Math.random()-.5)*22;pos[i*3+1]=Math.random()*6+1;pos[i*3+2]=(Math.random()-.5)*12;}
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  dustPts=new THREE.Points(g,new THREE.PointsMaterial({color:0x888888,size:.018,transparent:true,opacity:.25,sizeAttenuation:true}));
+  scene.add(dustPts);
+}
+
+// ================================================================
+//  BEACON
+// ================================================================
+function buildBeacon() {
+  const g=new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.CylinderGeometry(.09,.11,.05,12),mats.dkMetal));
+  const dome=new THREE.Mesh(new THREE.SphereGeometry(.07,12,8,0,Math.PI*2,0,Math.PI/2),new THREE.MeshStandardMaterial({color:C.COL.red,emissive:C.COL.red,emissiveIntensity:0,transparent:true,opacity:.75,roughness:.2}));
+  dome.position.y=.03;g.add(dome);
+  const lt=new THREE.PointLight(C.COL.red,0,5);lt.position.y=.1;g.add(lt);
+  g.position.set(-C.CONV_LEN/2-.5,C.CONV_H+.5,C.CONV_W/2+.3);
+  g.userData={light:lt,dome};beacon=g;scene.add(g);
+}
+
+// ================================================================
+//  TEXT SPRITE
+// ================================================================
+function mkSprite(text,o={}){
+  const sz=o.size||24,col=o.color||'#fff',bg=o.bg||'rgba(5,8,13,0.7)';
+  const cv=document.createElement('canvas');cv.width=256;cv.height=128;const cx=cv.getContext('2d');
+  cx.fillStyle=bg;cx.fillRect(0,0,256,128);
+  cx.font=`bold ${sz}px 'JetBrains Mono',monospace`;cx.fillStyle=col;cx.textAlign='center';cx.textBaseline='middle';
+  const lines=text.split('\n'),lh=sz*1.3,sy=64-(lines.length-1)*lh/2;
+  lines.forEach((l,i)=>cx.fillText(l,128,sy+i*lh));
+  return new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv),transparent:true}));
+}
+
+// ================================================================
+//  PACKAGE MESH FACTORY
+// ================================================================
+function mkPkg(wc, id, adc) {
+  const g=new THREE.Group();
+  let w,h,d,col;
+  if(wc===0){w=.22+Math.random()*.1;h=.18+Math.random()*.08;d=.18+Math.random()*.1;col=new THREE.Color(0xa58030).lerp(new THREE.Color(0xc09040),Math.random());}
+  else if(wc===1){w=.32+Math.random()*.12;h=.23+Math.random()*.1;d=.28+Math.random()*.1;col=new THREE.Color(0x8b6914).lerp(new THREE.Color(0xa07828),Math.random());}
+  else{w=.42+Math.random()*.15;h=.32+Math.random()*.1;d=.38+Math.random()*.1;col=new THREE.Color(0x5a4520).lerp(new THREE.Color(0x6b5530),Math.random());}
+  const box=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color:col,roughness:.82+Math.random()*.08}));box.castShadow=true;g.add(box);
+  // Tape
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(w*.28,.004,d+.015),mats.tape)).position.y=h/2+.002;
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(w+.015,.004,w*.2),mats.tape)).position.y=h/2+.002;
+  // Label
+  const lc=document.createElement('canvas');lc.width=128;lc.height=64;const lx=lc.getContext('2d');
+  lx.fillStyle='#f0e8d8';lx.fillRect(0,0,128,64);lx.fillStyle='#333';lx.font='bold 10px monospace';lx.fillText(id,4,13);
+  lx.font='8px monospace';lx.fillText((adc/255*8).toFixed(1)+' kg',4,25);lx.fillText('ADC:'+adc.toString(16).toUpperCase().padStart(2,'0')+'H',4,37);
+  for(let i=0;i<24;i++){lx.fillStyle=Math.random()>.4?'#111':'#f0e8d8';lx.fillRect(4+i*4.5,44,Math.random()>.5?3:2,16);}
+  g.add(new THREE.Mesh(new THREE.PlaneGeometry(w*.65,h*.45),new THREE.MeshStandardMaterial({map:new THREE.CanvasTexture(lc),roughness:.6}))).position.set(0,0,d/2+.003);
+  // Class marker
+  const mc=[0x258bff,0xffad32,0x42e58a][wc];
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(.018,6,6),new THREE.MeshStandardMaterial({color:mc,emissive:mc,emissiveIntensity:1.5,roughness:.3}))).position.set(w/2-.04,h/2+.01,0);
+  // Heavy corners
+  if(wc===2)[[-1,-1],[-1,1],[1,-1],[1,1]].forEach(([cx2,cz])=>g.add(new THREE.Mesh(new THREE.BoxGeometry(.035,h+.01,.035),new THREE.MeshStandardMaterial({color:0x555,roughness:.4,metalness:.6}))).position.set(cx2*(w/2-.01),0,cz*(d/2-.01)));
+  return g;
+}
+
+// ================================================================
+//  REGISTER GRID — built once, values updated in-place
+// ================================================================
+const regEls={};
+function buildRegGrid(){
+  const names=['AX','BX','CX','DX','SP','BP','SI','DI','IP','FL','CS','DS','SS','ES','ADC','PA','PB'];
+  const grid=DOM.regGrid;grid.innerHTML='';
+  names.forEach(n=>{
+    const c=document.createElement('div');c.className='reg-cell';
+    c.innerHTML=`<span class="reg-label">${n}</span><span class="reg-value" id="rv_${n}">0000H</span>`;
+    grid.appendChild(c);
+    regEls[n]=c.querySelector('.reg-value');
+  });
+}
+function refreshRegs(){
+  const c=STATE.cpu;
+  const hex=(v,w=4)=>v.toString(16).toUpperCase().padStart(w,'0')+'H';
+  regEls.AX.textContent=hex(c.AX);regEls.BX.textContent=hex(c.BX);regEls.CX.textContent=hex(c.CX);regEls.DX.textContent=hex(c.DX);
+  regEls.SP.textContent=hex(c.SP);regEls.BP.textContent=hex(c.BP);regEls.SI.textContent=hex(c.SI);regEls.DI.textContent=hex(c.DI);
+  regEls.IP.textContent=hex(c.IP);regEls.FL.textContent=hex(c.FLAGS);regEls.CS.textContent=hex(c.CS);regEls.DS.textContent=hex(c.DS);
+  regEls.SS.textContent=hex(c.SS);regEls.ES.textContent=hex(c.ES);
+  regEls.ADC.textContent=hex(c.ADC_DATA,2);regEls.PA.textContent=hex(c.PORT_A,2);regEls.PB.textContent=hex(c.PORT_B,2);
+}
+
+// ================================================================
+//  MICRO-LOG
+// ================================================================
+let logCount=0;
+function log(msg,type){
+  const now=new Date(),ts=`[${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}.${String(now.getMilliseconds()).padStart(3,'0')}]`;
+  const d=document.createElement('div');
+  d.className={'bus':'log-bus','pc':'log-pc','branch':'log-branch','int':'log-int','done':'log-done'}[type]||'text-gray-400';
+  d.textContent=`${ts} ${msg}`;
+  DOM.logContent.appendChild(d);
+  logCount++;
+  if(logCount>120){DOM.logContent.removeChild(DOM.logContent.firstChild);logCount--;}
+  DOM.logScroll.scrollTop=DOM.logScroll.scrollHeight;
+}
+
+// ================================================================
+//  METRICS & HISTORY
+// ================================================================
+function refreshMetrics(){
+  const t=STATE.total;
+  DOM.b1c.textContent=STATE.bins[0];DOM.b2c.textContent=STATE.bins[1];DOM.b3c.textContent=STATE.bins[2];
+  if(t>0){
+    const p=STATE.bins.map(b=>(b/t*100).toFixed(0));
+    DOM.b1p.textContent=p[0]+'%';DOM.b2p.textContent=p[1]+'%';DOM.b3p.textContent=p[2]+'%';
+    DOM.b1f.style.width=p[0]+'%';DOM.b2f.style.width=p[1]+'%';DOM.b3f.style.width=p[2]+'%';
+    DOM.d1.style.width=p[0]+'%';DOM.d2.style.width=p[1]+'%';DOM.d3.style.width=p[2]+'%';
+    DOM.dp1.textContent=p[0]+'%';DOM.dp2.textContent=p[1]+'%';DOM.dp3.textContent=p[2]+'%';
+  }
+  DOM.totDisp.textContent=t;
+  DOM.actDisp.textContent=STATE.packages.length;
+  if(STATE.procTimes.length>0){
+    DOM.avgDisp.textContent=(STATE.procTimes.reduce((a,b)=>a+b,0)/STATE.procTimes.length).toFixed(1)+'s';
+  }
+  const elMin=(Date.now()-STATE.startTime)/60000;
+  const ipm=elMin>0?(t/elMin).toFixed(1):'0.0';
+  DOM.ipmDisp.textContent=ipm;
+  DOM.tpGauge.style.width=Math.min(parseFloat(ipm)/30*100,100)+'%';
+  DOM.haltsDisp.textContent=STATE.haltCount;
+  DOM.int0sDisp.textContent=STATE.int0Count;
+  DOM.faultsDisp.textContent=STATE.faults;
+  const upM=Math.floor(elMin);
+  DOM.uptimeDisp.textContent=upM<60?upM+'m':Math.floor(upM/60)+'h '+upM%60+'m';
+}
+function refreshHistory(){
+  const el=DOM.histList;el.innerHTML='';
+  const items=STATE.history.slice(-8).reverse();
+  const binNames=['B1·L','B2·M','B3·H'];const binCols=['#258bff','#ffad32','#42e58a'];
+  items.forEach(h=>{
+    const r=document.createElement('div');r.className='hist-row';
+    r.innerHTML=`<span style="color:#c8d6e5">${h.id}</span><span style="color:#38d9ff">${h.adc.toString(16).toUpperCase().padStart(2,'0')}H</span><span style="color:#888">${(h.adc/255*8).toFixed(1)}</span><span style="color:${binCols[h.bin]}">${binNames[h.bin]}</span>`;
+    el.appendChild(r);
+  });
+}
+
+// ================================================================
+//  SPAWN
+// ================================================================
+function doSpawn(){
+  const now=Date.now();
+  if(STATE.halted||STATE.packages.length>=C.MAX_PKG)return;
+  if(now-STATE.lastSpawn<C.SPAWN_CD)return;
+  STATE.lastSpawn=now;
+
+  const mode=document.getElementById('pkgMode').value;
+  let wc,adc;
+  if(mode==='light'){wc=0;adc=Math.floor(Math.random()*85);}
+  else if(mode==='medium'){wc=1;adc=85+Math.floor(Math.random()*86);}
+  else if(mode==='heavy'){wc=2;adc=171+Math.floor(Math.random()*85);}
+  else{adc=Math.floor(Math.random()*256);wc=adc<0x55?0:adc<=0xAA?1:2;}
+
+  STATE.pkgSeq++;
+  const id='PKG-'+STATE.pkgSeq.toString(16).toUpperCase().padStart(4,'0');
+  const mesh=mkPkg(wc,id,adc);
+  mesh.position.set(-C.CONV_LEN/2-.5,C.CONV_H+.12,0);
+  scene.add(mesh);
+
+  STATE.packages.push({
+    mesh, id, wc, adc, progress:0,
+    state:'entering', timer:0, targetBin:-1, divertProg:0,
+    spawnTime:now,
+    // Per-package CPU context — eliminates race conditions
+    cpuCtx:{ IP:0x0100, AX:0, SP:0xFFFE }
+  });
+
+  STATE.cpu.DX=adc; STATE.cpu.IP+=2;
+  log(`MOV AL, 01H / OUT MOTOR_PORT, AL      ; belt ON`,'bus');
+  log(`; ${id} spawned — ADC preset: ${adc.toString(16).toUpperCase().padStart(2,'0')}H (${(adc/255*8).toFixed(1)} kg)`,'done');
+  refreshRegs();
+}
+
+// ================================================================
+//  SIMULATION STATE MACHINE (per-package, deterministic)
+// ================================================================
+function updatePackages(dt){
+  if(STATE.halted)return;
+  const L=C.CONV_LEN,H=C.CONV_H,W=C.CONV_W;
+  const spd=STATE.speed*.04*dt;
+  const remove=[];
+
+  for(let i=0;i<STATE.packages.length;i++){
+    const p=STATE.packages[i];
+    if(p.state==='done'){remove.push(i);continue;}
+
+    switch(p.state){
+      case 'entering':
+        p.progress+=spd;
+        if(p.progress>=C.IR_POS-.02){p.state='at_sensor';p.timer=0;doINT0(p);}
+        break;
+
+      case 'at_sensor':
+        p.timer+=dt;
+        if(irBeam)irBeam.material.opacity=Math.sin(p.timer*25)*.3+.2;
+        if(irLed)irLed.material.emissiveIntensity=2;
+        p.progress+=spd*.4;
+        if(p.timer>350){
+          p.state='to_scanner';
+          if(irBeam)irBeam.material.opacity=.55;
+          if(irLed)irLed.material.emissiveIntensity=.4;
+          STATE.int0=false;DOM.led_int0.className='led led-off';
+        }
+        break;
+
+      case 'to_scanner':
+        p.progress+=spd;
+        if(p.progress>=C.SCAN_POS-.02){p.state='scanning';p.timer=0;doScan(p);}
+        break;
+
+      case 'scanning':
+        p.timer+=dt;
+        if(scanBeamMesh&&STATE.opts.vfx){const sp2=Math.min(p.timer/400,1);scanBeamMesh.material.opacity=sp2<1?.35:0;scanBeamMesh.position.z=-.25+sp2*.5;}
+        p.progress+=spd*.25;
+        if(p.timer>500){p.state='adc';p.timer=0;doADCStart(p);if(scanBeamMesh)scanBeamMesh.material.opacity=0;}
+        break;
+
+      case 'adc':
+        p.timer+=dt;
+        p.progress+=spd*.4;
+        if(p.timer>C.ADC_TIME){doADCEnd(p);p.state='routed';p.timer=0;}
+        break;
+
+      case 'routed':
+        p.progress+=spd;
+        if(p.targetBin===0&&p.progress>=C.DIV1-.01){doDiverter(0,p);p.state='diverting';p.timer=0;p.divertProg=0;}
+        else if(p.targetBin===1&&p.progress>=C.DIV2-.01){doDiverter(1,p);p.state='diverting';p.timer=0;p.divertProg=0;}
+        else if(p.targetBin===2&&p.progress>=.98){p.state='binning';p.timer=0;doComplete(p);}
+        break;
+
+      case 'diverting':
+        p.timer+=dt;p.divertProg=Math.min(p.timer/650,1);
+        const bIdx=p.targetBin,divX=-L/2+(bIdx===0?C.DIV1:C.DIV2)*L;
+        const tZ=-(W/2+1.5),e=easeIO(p.divertProg);
+        p.mesh.position.set(divX+e*.25,H+.12-e*(H-.35),e*tZ);
+        if(p.divertProg>=1){p.state='binning';p.timer=0;doComplete(p);}
+        continue; // skip position update below
+
+      case 'binning':
+        p.timer+=dt;
+        if(p.timer<300)p.mesh.position.y-=dt*.0003;
+        if(p.timer>700){
+          p.state='done';scene.remove(p.mesh);
+          p.mesh.traverse(c=>{if(c.geometry)c.geometry.dispose();if(c.material){if(c.material.map)c.material.map.dispose();c.material.dispose();}});
+        }
+        continue;
+    }
+    // Default position on belt
+    if(p.state!=='diverting'&&p.state!=='binning'&&p.state!=='done'){
+      p.mesh.position.set(-L/2+p.progress*L,H+.12,0);
+    }
+  }
+  // Remove done packages (reverse order to keep indices valid)
+  for(let i=remove.length-1;i>=0;i--)STATE.packages.splice(remove[i],1);
+}
+
+// ================================================================
+//  8086 ISR SIMULATION (per-package context)
+// ================================================================
+function doINT0(p){
+  STATE.int0=true;STATE.int0Count++;
+  // Snapshot into CPU display
+  const c=STATE.cpu;
+  c.IP=0x0003;c.FLAGS|=0x0200;c.AX=0;c.SP-=6;
+  DOM.led_int0.className='led led-red';
+  DOM.pkgIdDisp.textContent=p.id;
+  log(`INT0 VECTOR 0003H                      ; ${p.id} detected`,'int');
+  log(`PUSHF / PUSH CS / PUSH IP              ; save context`,'pc');
+  log(`CALL SENSOR_ISR                        ; jump to ISR @0200H`,'pc');
+  c.IP=0x0200;
+  refreshRegs();
+}
+
+function doScan(p){
+  log(`; Scanner active — ${p.id} under scan head`,'bus');
+  log(`MOV SI, ${p.adc.toString(16).toUpperCase().padStart(4,'0')}H     ; weight preset`,'bus');
+  STATE.cpu.SI=p.adc;STATE.cpu.IP+=3;
+  flashTraces();refreshRegs();
+}
+
+function doADCStart(p){
+  STATE.adcState='CONVERTING';STATE.cpu.ADC_DATA=0;STATE.cpu.AX=0x37;
+  log(`MOV AL, 37H                            ; ADC WR strobe`,'bus');
+  log(`OUT ADC_DATA_PORT, AL                  ; WR=0 → WR=1`,'bus');
+  DOM.adcDisp.innerHTML='ADC: <span class="text-amber-cargo blink">CONVERTING</span>';
+  STATE.cpu.IP+=4;refreshRegs();
+}
+
+function doADCEnd(p){
+  STATE.adcState='READ_COMPLETE';
+  const c=STATE.cpu;c.ADC_DATA=p.adc;c.AX=p.adc;
+  log(`IN AL, ADC_DATA_PORT                   ; RD=0 → latch`,'bus');
+  log(`; ADC result: ${p.adc.toString(16).toUpperCase().padStart(2,'0')}H (${(p.adc/255*8).toFixed(1)} kg)`,'bus');
+
+  if(p.adc<0x55){p.targetBin=0;log(`CMP AL, 55H / JB ROUTE_LIGHT           ; → BIN 1`,'branch');DOM.routeDisp.innerHTML='<span class="text-blue-cargo">→ BIN 1 (LIGHT)</span>';}
+  else if(p.adc<=0xAA){p.targetBin=1;log(`CMP AL, 55H / JAE .next`,'branch');log(`CMP AL, 0AAH / JBE ROUTE_MEDIUM        ; → BIN 2`,'branch');DOM.routeDisp.innerHTML='<span class="text-amber-cargo">→ BIN 2 (MEDIUM)</span>';}
+  else{p.targetBin=2;log(`CMP AL, 0AAH / JA ROUTE_HEAVY          ; → BIN 3`,'branch');DOM.routeDisp.innerHTML='<span class="text-green-cargo">→ BIN 3 (HEAVY)</span>';}
+
+  DOM.adcDisp.innerHTML='ADC: <span class="text-green-cargo">READ OK</span>';
+  DOM.adcValDisp.textContent=p.adc.toString(16).toUpperCase().padStart(2,'0')+'H';
+  c.IP+=6;c.BX=p.targetBin;
+  flashTraces();refreshRegs();
+
+  // Clear ADC display after delay (tracked by state, not setTimeout race)
+  p._adcClearTimer=800;
+}
+
+function doDiverter(idx,p){
+  // Delta-time driven gate — no setTimeout
+  STATE.diverters[idx].state='opening';STATE.diverters[idx].target=C.GATE_ROT;STATE.diverters[idx].timer=0;
+  const bit=idx===0?0x01:0x02;STATE.cpu.PORT_B|=bit;STATE.cpu.AX=bit;
+  log(`MOV AL, ${bit.toString(16).toUpperCase().padStart(2,'0')}H / OUT DIVERTER_PORT, AL  ; Gate ${idx+1} OPEN`,'bus');
+  if(diverterLEDs[idx])diverterLEDs[idx].material.emissiveIntensity=2;
+  STATE.cpu.IP+=3;refreshRegs();
+}
+
+function doComplete(p){
+  const names=['LIGHT/BIN1','MEDIUM/BIN2','HEAVY/BIN3'];
+  STATE.bins[p.targetBin]++;STATE.total++;
+  const pt=(Date.now()-p.spawnTime)/1000;
+  STATE.procTimes.push(pt);if(STATE.procTimes.length>30)STATE.procTimes.shift();
+
+  log(`; ${p.id} → ${names[p.targetBin]} — ${pt.toFixed(1)}s`,'done');
+  log(`IRET                                   ; return from ISR`,'pc');
+
+  STATE.cpu.SP+=6;STATE.cpu.IP=0x0100;STATE.cpu.FLAGS&=~0x0200;
+
+  // Record in history
+  STATE.history.push({id:p.id,adc:p.adc,bin:p.targetBin,time:Date.now(),procTime:pt});
+  if(STATE.history.length>100)STATE.history.shift();
+
+  refreshMetrics();refreshHistory();refreshRegs();saveState();
+}
+
+// ================================================================
+//  DIVERTER ANIMATION (delta-time, no setTimeout)
+// ================================================================
+function updateDiverters(dt){
+  STATE.diverters.forEach((d,idx)=>{
+    const lerpFactor=1-Math.pow(.0001,dt/1000); // frame-rate independent lerp
+    if(d.state==='opening'){
+      d.angle+=(d.target-d.angle)*lerpFactor*4;
+      if(Math.abs(d.angle-d.target)<.01){d.angle=d.target;d.state='holding';d.timer=0;}
+    } else if(d.state==='holding'){
+      d.timer+=dt;
+      if(d.timer>C.GATE_HOLD){d.state='closing';d.target=0;}
+    } else if(d.state==='closing'){
+      d.angle+=(0-d.angle)*lerpFactor*3;
+      if(Math.abs(d.angle)<.008){
+        d.angle=0;d.state='idle';
+        const bit=idx===0?0x01:0x02;STATE.cpu.PORT_B&=~bit;
+        log(`AND AL, ${(~bit&0xFF).toString(16).toUpperCase().padStart(2,'0')}H / OUT DIVERTER_PORT, AL  ; Gate ${idx+1} CLOSE`,'bus');
+        if(diverterLEDs[idx])diverterLEDs[idx].material.emissiveIntensity=.3;
+        refreshRegs();
+      }
+    }
+    if(diverterArms[idx])diverterArms[idx].rotation.y=-d.angle;
+  });
+}
+
+// ================================================================
+//  E-STOP / RESUME
+// ================================================================
+function doEstop(){
+  if(STATE.halted)return;
+  STATE.halted=true;STATE.int1=true;STATE.haltCount++;
+  STATE.cpu.PORT_A&=0xFE;STATE.cpu.FLAGS|=0x0100;
+  DOM.led_int1.className='led led-red';
+  DOM.statusBadge.className='status-halt text-[9px] font-mono font-bold px-2.5 py-0.5 rounded-full tracking-wider';
+  DOM.statusBadge.textContent='HALT';
+  DOM.motorDisp.className='text-red-int';DOM.motorDisp.textContent='OFF';
+  DOM.btnEstop.classList.add('halted');
+  log('; ═══════ EMERGENCY STOP ═══════','int');
+  log(`INT1 / NMI VECTOR 0002H                ; E-STOP`,'int');
+  log(`MOV AL, 00H / OUT MOTOR_PORT, AL       ; motor OFF`,'int');
+  log(`SYSTEM HALTED (8086 NMI / INT1 ACTIVE)`,'int');
+  if(beacon){beacon.userData.light.intensity=2;beacon.userData.dome.material.emissiveIntensity=2;}
+  refreshRegs();refreshMetrics();saveState();
+}
+function doResume(){
+  if(!STATE.halted)return;
+  STATE.halted=false;STATE.int1=false;
+  STATE.cpu.PORT_A|=0x01;STATE.cpu.FLAGS&=~0x0100;STATE.cpu.IP=0x0100;
+  DOM.led_int1.className='led led-off';
+  DOM.statusBadge.className='status-running text-[9px] font-mono font-bold px-2.5 py-0.5 rounded-full tracking-wider';
+  DOM.statusBadge.textContent='RUNNING';
+  DOM.motorDisp.className='text-green-cargo';DOM.motorDisp.textContent='ON';
+  DOM.btnEstop.classList.remove('halted');
+  log('; ═══════ SYSTEM RESUMED ═══════','done');
+  log(`MOV AL, 01H / OUT MOTOR_PORT, AL       ; motor ON`,'done');
+  log(`IRET                                   ; resume from NMI`,'pc');
+  if(beacon){beacon.userData.light.intensity=0;beacon.userData.dome.material.emissiveIntensity=0;}
+  refreshRegs();
+}
+
+// ================================================================
+//  VFX
+// ================================================================
+function updateVFX(dt,t){
+  if(beltTex&&!STATE.halted)beltTex.offset.x+=STATE.speed*dt*.0003;
+  if(!STATE.halted)rollers.forEach(r=>r.rotation.z+=STATE.speed*dt*.003);
+  if(conveyorGroup&&!STATE.halted){conveyorGroup.position.y=Math.sin(t*15)*.0007;conveyorGroup.position.x=Math.sin(t*12)*.0002;}
+  if(dustPts&&STATE.opts.particles){
+    dustPts.visible=true;const ps=dustPts.geometry.attributes.position;
+    for(let i=0;i<ps.count;i++){ps.array[i*3+1]+=Math.sin(t+i)*.0008;ps.array[i*3]+=Math.cos(t*.5+i*.7)*.0004;if(ps.array[i*3+1]>7)ps.array[i*3+1]=1;if(ps.array[i*3+1]<.5)ps.array[i*3+1]=6;}
+    ps.needsUpdate=true;
+  } else if(dustPts)dustPts.visible=false;
+  if(STATE.opts.vfx)pcbTraces.forEach((tr,i)=>tr.material.opacity=.2+Math.sin(t*3+i*1.5)*.2);
+  if(STATE.halted&&beacon){beacon.rotation.y+=dt*.005;beacon.userData.dome.material.emissiveIntensity=1.5+Math.sin(t*8)*.5;beacon.userData.light.intensity=1.5+Math.sin(t*8)*.5;}
+  labels.forEach(s=>s.visible=STATE.opts.labels);
+  // Clear ADC display for packages that have a timer
+  STATE.packages.forEach(p=>{if(p._adcClearTimer!==undefined){p._adcClearTimer-=dt;if(p._adcClearTimer<=0){delete p._adcClearTimer;STATE.adcState='IDLE';DOM.adcDisp.innerHTML='ADC: <span class="text-gray-400">IDLE</span>';}}});
+}
+function flashTraces(){pcbTraces.forEach(t=>{t.material.opacity=1;t._flash=200;});}
+
+// ================================================================
+//  CAMERA
+// ================================================================
+const CAM_PRESETS=[
+  {p:new THREE.Vector3(14,11,14),t:new THREE.Vector3(0,1,0)},    // ISO
+  {p:new THREE.Vector3(0,14,.5),t:new THREE.Vector3(0,1,-1)},    // TOP
+  {p:new THREE.Vector3(-9,2,2.5),t:new THREE.Vector3(2,1.2,0)},  // BELT
+  {p:new THREE.Vector3(-3,2,4.5),t:new THREE.Vector3(-2,.8,C.CONV_W/2+1.5)}, // CPU
+  {p:new THREE.Vector3(8,2.5,-3),t:new THREE.Vector3(-2,1,0)},   // FRONT
+  null // AUTO ORBIT
+];
+function setCam(idx){
+  STATE.camPreset=idx;STATE.autoOrbit=idx===5;
+  document.querySelectorAll('#cam0,#cam1,#cam2,#cam3,#cam4,#cam5').forEach((b,i)=>b.classList.toggle('active',i===idx));
+  if(idx<5&&CAM_PRESETS[idx]){
+    STATE.camTransition={sp:camera.position.clone(),st:controls.target.clone(),ep:CAM_PRESETS[idx].p.clone(),et:CAM_PRESETS[idx].t.clone(),prog:0,dur:1.5};
+  }
+}
+function updateCam(dt,t){
+  if(STATE.camTransition){
+    const c=STATE.camTransition;c.prog+=dt/(c.dur*1000);const e=easeIO(Math.min(c.prog,1));
+    camera.position.lerpVectors(c.sp,c.ep,e);controls.target.lerpVectors(c.st,c.et,e);
+    if(c.prog>=1)STATE.camTransition=null;
+  }
+  if(STATE.autoOrbit){
+    const r=16,spd=t*.15;
+    camera.position.set(Math.cos(spd)*r,8+Math.sin(t*.3)*2,Math.sin(spd)*r);
+    controls.target.set(0,1,0);
+  }
+}
+
+// ================================================================
+//  UI UPDATE (throttled, efficient)
+// ================================================================
+let lastUIUpdate=0;
+function updateUI(t){
+  const now=Date.now();
+  if(now-lastUIUpdate<80)return; // ~12Hz max
+  lastUIUpdate=now;
+  const el=now-STATE.startTime;
+  const h=Math.floor(el/3600000),m=Math.floor(el%3600000/60000),s=Math.floor(el%60000/1000),ms=el%1000;
+  DOM.sysClock.textContent=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;
+  DOM.beltSpeedDisp.textContent=`BELT: ${STATE.speed.toFixed(1)} m/s`;
+  DOM.pwmDisp.textContent=`PWM ${STATE.halted?0:Math.round(STATE.speed/3*100)}%`;
+  DOM.actDisp.textContent=STATE.packages.length;
+}
+
+// ================================================================
+//  PUBLIC API (exposed to HTML onclick)
+// ================================================================
+const SIM={
+  spawn:doSpawn,
+  estop:doEstop,
+  resume:doResume,
+  cam:setCam,
+  setSpeed(v){STATE.speed=parseFloat(v);DOM.spdVal.textContent=parseFloat(v).toFixed(1);},
+  toggleAuto(){STATE.autoSpawn=!STATE.autoSpawn;DOM.btnAuto.classList.toggle('active',STATE.autoSpawn);},
+  tog(o){STATE.opts[o]=!STATE.opts[o];const m={labels:'togL',vfx:'togV',particles:'togP'};DOM[m[o]].classList.toggle('active',STATE.opts[o]);}
+};
+window.SIM=SIM; // expose globally
+
+// ================================================================
+//  INPUT
+// ================================================================
+function onKey(e){
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
+  switch(e.key){
+    case ' ':e.preventDefault();doSpawn();break;
+    case 'e':case 'E':doEstop();break;
+    case 'r':case 'R':doResume();break;
+    case 'a':case 'A':SIM.toggleAuto();break;
+    case '1':setCam(0);break;case '2':setCam(1);break;case '3':setCam(2);break;
+    case '4':setCam(3);break;case '5':setCam(4);break;case '0':setCam(5);break;
+  }
+}
+function onResize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);}
+function easeIO(t){return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;}
+
+// ================================================================
+//  MAIN LOOP
+// ================================================================
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=theClock.getDelta()*1000,t=theClock.getElapsedTime();
+  updateCam(dt,t);
+  controls.update();
+  updatePackages(dt);
+  updateDiverters(dt);
+  updateVFX(dt,t);
+  updateUI(t);
+  // Auto-spawn
+  if(STATE.autoSpawn&&!STATE.halted&&Date.now()-STATE.lastSpawn>C.AUTO_CD)doSpawn();
+  // Trace flash decay
+  pcbTraces.forEach(tr=>{if(tr._flash>0){tr._flash-=dt;if(tr._flash<=0)tr.material.opacity=.35;}});
+  renderer.render(scene,camera);
+}
+
+// ================================================================
+//  BOOT
+// ================================================================
+init();
+</script>
+</body>
+</html>
